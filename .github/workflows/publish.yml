@@ -1,3 +1,11 @@
+# Place this file at .github/workflows/release.yml in the PUBLIC repo (Record10/record-bill)
+# Builds are free & unlimited on public repos.
+#
+# REQUIRED SECRETS (set in Record10/record-bill → Settings → Secrets):
+#   - PRIVATE_REPO_PAT                   : Fine-grained PAT with Contents:Read on Pritraj/Record-Bill
+#   - TAURI_SIGNING_PRIVATE_KEY          : Tauri update signing key (~/.tauri/myshapkey.key)
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
+#
 name: Release
 
 on:
@@ -11,10 +19,6 @@ on:
         options:
           - qa
           - main
-      version_override:
-        description: "Version override (leave empty to read from tauri.conf.json)"
-        required: false
-        type: string
 
 jobs:
   build:
@@ -72,15 +76,13 @@ jobs:
         run: npm run build
         working-directory: frontend
 
-      # ─── Version & release config ───
+      # ─── Read version & config from tauri.conf.json ───
       - name: Get Version
         id: get_version
         shell: bash
         run: |
           VERSION=$(grep '"version":' tauri/tauri.conf.json | head -n 1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
-          if [[ -n "${{ inputs.version_override }}" ]]; then
-            VERSION="${{ inputs.version_override }}"
-          fi
+          echo "Building version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Determine Release Config
@@ -92,7 +94,7 @@ jobs:
             echo "prerelease=true" >> $GITHUB_OUTPUT
             echo "tag=v${{ steps.get_version.outputs.version }}-qa.${{ github.run_number }}" >> $GITHUB_OUTPUT
 
-            # Merge QA config
+            # Merge QA config into tauri.conf.json
             if [[ "$RUNNER_OS" == "Windows" ]]; then
               choco install jq -y
             fi
@@ -110,6 +112,7 @@ jobs:
         shell: bash
         run: |
           # Rename gen/android so tauri-build doesn't try to write tauri.settings.gradle
+          # (Windows env vars are case-insensitive, causing os error 3)
           mv tauri/gen/android tauri/gen/_android_disabled
           # Remove deep-link config to prevent plugin panic on Windows
           jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json

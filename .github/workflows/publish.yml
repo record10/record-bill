@@ -156,48 +156,33 @@ jobs:
         shell: bash
         run: |
           TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
-          # Convert to native path for Gradle/Java (they need Windows paths)
           NATIVE_TEMP="${{ runner.temp }}"
 
-          mkdir -p $HOME/.gradle
-          # Write to User Home (Standard) - use native path for Gradle
-          echo "ANDROID_KEYSTORE_FILE=$NATIVE_TEMP/release.keystore" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/.gradle/gradle.properties
+          # ── Primary: keystore.properties in Android project root ──
+          # This is where build.gradle.kts checks first: rootProject.file("keystore.properties")
+          # rootProject for Gradle = tauri/gen/android/
+          echo "storeFile=$NATIVE_TEMP/release.keystore" > tauri/gen/android/keystore.properties
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/keystore.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/keystore.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/keystore.properties
 
-          # Write to Project Root (tauri/gen/android/gradle.properties) - Backup ensuring visibility
-          echo "ANDROID_KEYSTORE_FILE=$NATIVE_TEMP/release.keystore" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/gradle.properties
-
-          # Write to Tauri Root (tauri/keystore.properties) - File fallback
+          # ── Fallback: keystore.properties in tauri root ──
+          # build.gradle.kts also checks rootProject.file("../../keystore.properties") = tauri/
           echo "storeFile=$NATIVE_TEMP/release.keystore" > tauri/keystore.properties
           echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/keystore.properties
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/keystore.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/keystore.properties
 
-          # Write to HOME directly (Safer than repo, persists)
-          echo "storeFile=$NATIVE_TEMP/release.keystore" > $HOME/keystore.properties
-          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/keystore.properties
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/keystore.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/keystore.properties
+          # ── Gradle properties (env var fallback) ──
+          mkdir -p $HOME/.gradle
+          echo "ANDROID_KEYSTORE_FILE=$NATIVE_TEMP/release.keystore" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/.gradle/gradle.properties
 
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$TEMP_DIR/signing.properties"
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$TEMP_DIR/signing.properties"
-
-          # Write to Android Project Root (tauri/gen/android)
-          echo "storeFile=$NATIVE_TEMP/release.keystore" > tauri/gen/android/signing.properties
-          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/signing.properties
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/signing.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/signing.properties
-
-          echo "DEBUG: Verifying properties files..."
-          ls -la tauri/gen/android/signing.properties
-
-          echo "DEBUG: Verifying build.gradle.kts content (Check for updates)..."
-          cat tauri/gen/android/app/build.gradle.kts | grep "signing.properties" || echo "WARNING: Code update missing!"
+          echo "SIGNING: Verifying keystore.properties..."
+          cat tauri/gen/android/keystore.properties | head -1
+          ls -l "$TEMP_DIR/release.keystore"
 
       - name: Build Android APK
         if: matrix.target == 'android'

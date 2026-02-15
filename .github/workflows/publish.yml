@@ -30,7 +30,7 @@ jobs:
         include:
           - platform: macos-latest
             target: desktop
-          - platform: macos-latest
+          - platform: windows-latest
             target: android
           - platform: windows-latest
             target: desktop
@@ -55,7 +55,7 @@ jobs:
         with:
           targets: ${{ matrix.target == 'android' && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || '' }}
 
-      # ─── Android-specific setup (macOS + android target only) ───
+      # ─── Android-specific setup ───
       - name: Install Java (Android only)
         if: matrix.target == 'android'
         uses: actions/setup-java@v4
@@ -106,14 +106,23 @@ jobs:
             echo "tag=v${{ steps.get_version.outputs.version }}" >> $GITHUB_OUTPUT
           fi
 
-      # ─── Windows workaround ───
-      - name: Workaround for Android/deep-link on Windows
-        if: runner.os == 'Windows'
+      # ─── Windows workaround (desktop only) ───
+      - name: Workaround for deep-link on Windows (Desktop)
+        if: runner.os == 'Windows' && matrix.target == 'desktop'
         shell: bash
         run: |
           # Rename gen/android so tauri-build doesn't try to write tauri.settings.gradle
           # (Windows env vars are case-insensitive, causing os error 3)
           mv tauri/gen/android tauri/gen/_android_disabled
+          # Remove deep-link config to prevent plugin panic on Windows
+          jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json
+          mv tauri/tauri.conf.temp.json tauri/tauri.conf.json
+
+      # ─── Windows workaround (android only) ───
+      - name: Remove deep-link config (Android on Windows)
+        if: runner.os == 'Windows' && matrix.target == 'android'
+        shell: bash
+        run: |
           # Remove deep-link config to prevent plugin panic on Windows
           jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json
           mv tauri/tauri.conf.temp.json tauri/tauri.conf.json
@@ -133,14 +142,74 @@ jobs:
           releaseDraft: false
           prerelease: ${{ steps.release_config.outputs.prerelease }}
 
-      # ─── Android build (macOS only) ───
+      # ─── Android build (Windows) ───
+      - name: Decode Android Keystore
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${{ runner.temp }}/release.keystore"
+          ls -l "${{ runner.temp }}/release.keystore"
+
+      - name: Configure Gradle Properties
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          mkdir -p $HOME/.gradle
+          # Write to User Home (Standard)
+          echo "ANDROID_KEYSTORE_FILE=${{ runner.temp }}/release.keystore" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/.gradle/gradle.properties
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/.gradle/gradle.properties
+
+          # Write to Project Root (tauri/gen/android/gradle.properties) - Backup ensuring visibility
+          echo "ANDROID_KEYSTORE_FILE=${{ runner.temp }}/release.keystore" >> tauri/gen/android/gradle.properties
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/gradle.properties
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/gradle.properties
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/gradle.properties
+
+          # Write to Tauri Root (tauri/keystore.properties) - File fallback
+          echo "storeFile=${{ runner.temp }}/release.keystore" > tauri/keystore.properties
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/keystore.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/keystore.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/keystore.properties
+
+          # Write to HOME directly (Safer than repo, persists)
+          echo "storeFile=${{ runner.temp }}/release.keystore" > $HOME/keystore.properties
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/keystore.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/keystore.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/keystore.properties
+
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> ${{ runner.temp }}/signing.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> ${{ runner.temp }}/signing.properties
+
+          # Write to Android Project Root (tauri/gen/android)
+          echo "storeFile=${{ runner.temp }}/release.keystore" > tauri/gen/android/signing.properties
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/signing.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/signing.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/signing.properties
+
+          echo "DEBUG: Verifying properties files..."
+          ls -la tauri/gen/android/signing.properties
+
+          echo "DEBUG: Verifying build.gradle.kts content (Check for updates)..."
+          cat tauri/gen/android/app/build.gradle.kts | grep "signing.properties" || echo "WARNING: Code update missing!"
+
       - name: Build Android APK
         if: matrix.target == 'android'
+        shell: bash
         run: |
-          chmod +x tauri/gen/android/gradlew
-          npm run build:android
+          cd tauri
+          ../frontend/node_modules/.bin/tauri android build --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          TAURI_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          TAURI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TAURI_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
 
       - name: Upload Android APK
         if: matrix.target == 'android'

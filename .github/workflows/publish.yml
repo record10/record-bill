@@ -155,7 +155,7 @@ jobs:
         shell: bash
         run: |
           cd tauri
-          ../frontend/node_modules/.bin/tauri android build --aab --target aarch64
+          ../frontend/node_modules/.bin/tauri android build --aab true --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

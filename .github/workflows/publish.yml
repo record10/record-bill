@@ -1,7 +1,7 @@
 # Place this file at .github/workflows/release.yml in the PUBLIC repo (Record10/record-bill)
 # Builds are free & unlimited on public repos.
 #
-# REQUIRED SECRETS (set in Record10/record-bill → Settings → Secrets):
+# REQUIRED SECRETS (set in Organization Settings → Secrets and variables → Actions):
 #   - PRIVATE_REPO_PAT                   : Fine-grained PAT with Contents:Read on Pritraj/Record-Bill
 #   - TAURI_SIGNING_PRIVATE_KEY          : Tauri update signing key (~/.tauri/myshapkey.key)
 #   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
@@ -9,7 +9,6 @@
 #   - ANDROID_STORE_PASSWORD             : Keystore password
 #   - ANDROID_KEY_ALIAS                  : Key alias in keystore
 #   - ANDROID_KEY_PASSWORD               : Key password
-#   - GOOGLE_PLAY_SERVICE_ACCOUNT_BASE64 : Base64-encoded Google Play service account JSON key
 #
 name: Release
 

@@ -24,15 +24,6 @@ on:
         options:
           - qa
           - main
-      play_store:
-        description: "Google Play Store publishing"
-        required: true
-        default: "play-store-no"
-        type: choice
-        options:
-          - play-store-no
-          - play-store-publish-test
-          - play-store-publish-prod
 
 jobs:
   build:
@@ -201,33 +192,6 @@ jobs:
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "Found AAB: $AAB_PATH"
           echo "Found APK: $APK_PATH"
-
-      - name: Decode Google Play Service Account
-        if: matrix.target == 'android' && inputs.play_store != 'play-store-no'
-        shell: bash
-        run: |
-          TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
-          echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_BASE64 }}" | base64 --decode > "$TEMP_DIR/play-service-account.json"
-
-      - name: Upload to Google Play (Internal Testing)
-        if: matrix.target == 'android' && inputs.play_store == 'play-store-publish-test'
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJson: ${{ runner.temp }}/play-service-account.json
-          packageName: com.recordbill.desktop
-          releaseFiles: ${{ steps.find_android.outputs.aab_path }}
-          track: internal
-          status: completed
-
-      - name: Upload to Google Play (Production)
-        if: matrix.target == 'android' && inputs.play_store == 'play-store-publish-prod'
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJson: ${{ runner.temp }}/play-service-account.json
-          packageName: com.recordbill.desktop
-          releaseFiles: ${{ steps.find_android.outputs.aab_path }}
-          track: production
-          status: completed
 
       - name: Upload Android builds to GitHub Release
         if: matrix.target == 'android'

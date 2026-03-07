@@ -4,11 +4,9 @@
 # REQUIRED SECRETS (set in Organization Settings → Secrets and variables → Actions):
 #   - PRIVATE_REPO_PAT                   : Fine-grained PAT with Contents:Read on Pritraj/Record-Bill
 #   - TAURI_SIGNING_PRIVATE_KEY          : Tauri update signing key (~/.tauri/myshapkey.key)
-#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
 #   - ANDROID_KEYSTORE_BASE64            : Base64-encoded Android keystore
-#   - KEYSTORE_PASSWORD                  : Keystore password
 #   - KEY_ALIAS                          : Key alias
-#   - KEY_PASSWORD                       : Key password
+#   - GEN_PASSWORD                       : Shared password (keystore, key, signing key)
 #
 name: Release
 
@@ -145,7 +143,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.GEN_PASSWORD }}
         with:
           projectPath: tauri
           tagName: ${{ steps.release_config.outputs.tag }}
@@ -184,8 +182,8 @@ jobs:
           ${BUILD_TOOLS_DIR}/apksigner sign \
             --ks /tmp/upload-keystore.jks \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
-            --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
+            --ks-pass "pass:${{ secrets.GEN_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.GEN_PASSWORD }}" \
             --out build-artifacts/app-release.apk \
             /tmp/app-aligned.apk
 
@@ -198,8 +196,8 @@ jobs:
           echo "Found AAB: $UNSIGNED_AAB"
           jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
             -keystore /tmp/upload-keystore.jks \
-            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            -storepass "${{ secrets.GEN_PASSWORD }}" \
+            -keypass "${{ secrets.GEN_PASSWORD }}" \
             "$UNSIGNED_AAB" "${{ secrets.KEY_ALIAS }}"
           cp "$UNSIGNED_AAB" build-artifacts/app-release.aab
 

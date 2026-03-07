@@ -6,9 +6,9 @@
 #   - TAURI_SIGNING_PRIVATE_KEY          : Tauri update signing key (~/.tauri/myshapkey.key)
 #   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
 #   - ANDROID_KEYSTORE_BASE64            : Base64-encoded Android keystore
-#   - ANDROID_STORE_PASSWORD             : Keystore password
-#   - ANDROID_KEY_ALIAS                  : Key alias in keystore
-#   - ANDROID_KEY_PASSWORD               : Key password
+#   - KEYSTORE_PASSWORD                  : Keystore password
+#   - KEY_ALIAS                          : Key alias
+#   - KEY_PASSWORD                       : Key password
 #
 name: Release
 
@@ -34,7 +34,7 @@ jobs:
         include:
           - platform: macos-latest
             target: desktop
-          - platform: windows-latest
+          - platform: ubuntu-latest
             target: android
           - platform: windows-latest
             target: desktop
@@ -70,6 +70,13 @@ jobs:
       - name: Setup Android SDK
         if: matrix.target == 'android'
         uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
 
       # ─── Build frontend ───
       - name: Install frontend dependencies
@@ -147,50 +154,54 @@ jobs:
           releaseDraft: false
           prerelease: ${{ steps.release_config.outputs.prerelease }}
 
-      # ─── Android build (Windows) ───
-      # build.gradle.kts reads ANDROID_KEYSTORE_BASE64 from env vars,
-      # decodes it to a temp .jks file, and configures signing automatically.
-      - name: Build Android AAB
+      # ─── Decode Android keystore ───
+      - name: Decode Android keystore
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/upload-keystore.jks
+
+      # ─── Android build (produces unsigned APK & AAB) ───
+      - name: Build Android
         if: matrix.target == 'android'
         shell: bash
         run: |
           cd tauri
-          ../frontend/node_modules/.bin/tauri android build --aab --target aarch64
+          ../frontend/node_modules/.bin/tauri android build --target aarch64
           mkdir -p ../build-artifacts
-          find gen/android/app/build/outputs/bundle -name "*.aab" -exec mv {} ../build-artifacts/ \;
         env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          NDK_HOME: ${{ env.NDK_HOME }}
 
-      - name: Build Android APK
+      # ─── Sign APK ───
+      - name: Sign APK
         if: matrix.target == 'android'
         shell: bash
         run: |
-          cd tauri
-          ../frontend/node_modules/.bin/tauri android build --apk --target aarch64
-          mkdir -p ../build-artifacts
-          find gen/android/app/build/outputs/apk -name "*.apk" -exec mv {} ../build-artifacts/ \;
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          UNSIGNED_APK=$(find tauri/gen/android -name "*.apk" -path "*release*" | head -1)
+          echo "Found APK: $UNSIGNED_APK"
+          BUILD_TOOLS_DIR="${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | sort -V | tail -1)"
+          ${BUILD_TOOLS_DIR}/zipalign -v 4 "$UNSIGNED_APK" /tmp/app-aligned.apk
+          ${BUILD_TOOLS_DIR}/apksigner sign \
+            --ks /tmp/upload-keystore.jks \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
+            --out build-artifacts/app-release.apk \
+            /tmp/app-aligned.apk
 
-      - name: Find Android build artifacts
+      # ─── Sign AAB ───
+      - name: Sign AAB
         if: matrix.target == 'android'
-        id: find_android
         shell: bash
         run: |
-          AAB_PATH=$(find build-artifacts -name "*.aab" | head -1)
-          APK_PATH=$(find build-artifacts -name "*.apk" | head -1)
-          echo "aab_path=$AAB_PATH" >> $GITHUB_OUTPUT
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "Found AAB: $AAB_PATH"
-          echo "Found APK: $APK_PATH"
+          UNSIGNED_AAB=$(find tauri/gen/android -name "*.aab" -path "*release*" | head -1)
+          echo "Found AAB: $UNSIGNED_AAB"
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore /tmp/upload-keystore.jks \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            "$UNSIGNED_AAB" "${{ secrets.KEY_ALIAS }}"
+          cp "$UNSIGNED_AAB" build-artifacts/app-release.aab
 
       - name: Upload Android builds to GitHub Release
         if: matrix.target == 'android'
@@ -198,5 +209,5 @@ jobs:
         with:
           tag_name: ${{ steps.release_config.outputs.tag }}
           files: |
-            ${{ steps.find_android.outputs.aab_path }}
-            ${{ steps.find_android.outputs.apk_path }}
+            build-artifacts/app-release.apk
+            build-artifacts/app-release.aab
